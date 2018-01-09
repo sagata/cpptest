@@ -1,5 +1,5 @@
-#include<iostream>
-#include<vector>
+#include <iostream>
+#include <vector>
 using namespace std;
 
 void printall(vector<int> a)
@@ -39,6 +39,7 @@ int main()
     {
         cout<<*t<<" ";
     }
+    
     cout<<endl;
     //基本接口
     cout<<a1.size()<<endl;  //向量中元素个数
