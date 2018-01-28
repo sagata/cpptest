@@ -1,8 +1,8 @@
 /*************************************************************************
-	> File Name: before.cpp
-	> Author: sagata
-	> Mail:  
-	> Created Time: 2018-01-28 19:37:23
+    > File Name: before.cpp
+    > Author: sagata
+    > Mail:  
+    > Created Time: 2018-01-28 19:37:23
     前序排序的递归和非递归版本
  ************************************************************************/
 
@@ -95,7 +95,7 @@ void mid_node_digui(node * root)
     stack<node *> s;
     s.push(root);
     node * p = root->left;
-    while(!s.empty() or p)
+    while(!s.empty() || p)
     {
         while(p)
         {
@@ -122,7 +122,7 @@ void back_node_digui(node * root)
     stack<node *> print_s;
     s.push(root);
     node * p = root->left;
-    while(!s.empty() or p)
+    while(!s.empty() || p)
     {
         while(p)
         {
@@ -130,26 +130,23 @@ void back_node_digui(node * root)
             p = p->left;
         }
         p = s.top();
-        cout<<p->num<<endl;
         if(!p->right)
         {
-            cout<<"11111fas";
             cout<<p->num<<" ";
             s.pop();
+            p =NULL;
         }
         else
         {
-            cout<<"fas";
-            if(p == print_s.top())
+            if(!print_s.empty() && p == print_s.top())
             {
-                cout<<"0:fas";
                 cout<<p->num<<" ";
                 s.pop();
                 print_s.pop();
+                p = NULL;
             }
             else
             {
-                cout<<"1fas";
                 print_s.push(p);
                 p = p->right;
             }
