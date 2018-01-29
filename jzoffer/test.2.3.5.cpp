@@ -1,29 +1,28 @@
 /*************************************************************************
-	> File Name: test.2.3.5.cpp
-	> Author: sagata
-	> Mail:  
-	> Created Time: 2018-01-28 22:19:38
+    > File Name: test.2.3.5.cpp
+    > Author: sagata
+    > Mail:  
+    > Created Time: 2018-01-28 22:19:38
  ************************************************************************/
 
 #include<iostream>
 #include<stack>
 using namespace std;
-class queue
+class qq
 {
 public:
-    queue();
     void push(int num);
     int pop();
 private:
     stack<int> s1;
     stack<int> s2;
 };
-void queue::push(int num)
+void qq::push(int num)
 {
    if(this->s1.empty()) this->s2.push(num);
    else this->s1.push(num);
 }
-int queue::pop()
+int qq::pop()
 {
     if(this->s1.empty() && this->s2.empty()) return -1;
     int tmp = 0;
@@ -49,11 +48,11 @@ int queue::pop()
         s2.pop();
         return tmp;
     }
-
+    return -1;
 }
 int main()
 {
-    queue q = new queue();
+    qq * q = new qq();
     q->push(1);
     q->push(2);
     q->push(3);
