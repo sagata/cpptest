@@ -1,117 +1,227 @@
-/*server.c*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/select.h>
+#include <sys/types.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <sys/epoll.h>
-#include <errno.h>
+#include <unistd.h>
+#include <assert.h>
 
-#define BUFSIZE 666
-#define SERV_PORT 8000
-#define OPEN_MAX 1024
+#define IPADDR      "127.0.0.1"
+#define PORT        8787
+#define MAXLINE     1024
+#define LISTENQ     5
+#define SIZE        10
 
-int main()
+typedef struct server_context_st
 {
-    int i, j, maxi, listenfd, connfd, sockfd;
-    int nready, efd, res;
-    ssize_t n;
-    char buf[BUFSIZE], str[INET_ADDRSTRLEN];
-    socklen_t clilen;
-    int client[OPEN_MAX];
-    struct sockaddr_in cliaddr, servaddr;
+    int cli_cnt;        /*客户端个数*/
+    int clifds[SIZE];   /*客户端的个数*/
+    fd_set allfds;      /*句柄集合*/
+    int maxfd;          /*句柄最大值*/
+} server_context_st;
+static server_context_st *s_srv_ctx = NULL;
+/*===========================================================================
+ * ==========================================================================*/
+static int create_server_proc(const char* ip,int port)
+{
+    int  fd;
+    struct sockaddr_in servaddr;
+    fd = socket(AF_INET, SOCK_STREAM,0);
+    if (fd == -1) {
+        fprintf(stderr, "create socket fail,erron:%d,reason:%s\n",
+                errno, strerror(errno));
+        return -1;
+    }
 
-    struct epoll_event tep, ep[OPEN_MAX];//监听事件
-    /*分配一个网络通信套接字，监听文件描述符listenfd*/
-    listenfd = socket(AF_INET, SOCK_STREAM, 0);
-    /*初始化 IP类型 端口*/
-    bzero(&servaddr, sizeof(servaddr));
+    /*一个端口释放后会等待两分钟之后才能再被使用，SO_REUSEADDR是让端口释放后立即就可以被再次使用。*/
+    int reuse = 1;
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == -1) {
+        return -1;
+    }
+
+    bzero(&servaddr,sizeof(servaddr));
     servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    servaddr.sin_port = htons(SERV_PORT);
-    /*将listenfd绑定服务端地址*/
-    bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
+    inet_pton(AF_INET,ip,&servaddr.sin_addr);
+    servaddr.sin_port = htons(port);
 
-    /*监听请求*/
-    listen(listenfd, 20);
-    /*将客户端标识初始化为-1*/
-    for(i = 0; i < OPEN_MAX; i++){
-        client[i] = -1;
-    }
-    maxi = -1;
-    /*告诉内核要监听的文件描述符个数 OPEN_MAX = 1024*/
-    efd = epoll_create(OPEN_MAX);
-
-    if(efd == -1){
-        perror("epoll_create");
+    if (bind(fd,(struct sockaddr*)&servaddr,sizeof(servaddr)) == -1) {
+        perror("bind error: ");
+        return -1;
     }
 
-    tep.events = EPOLLIN;/*监听文件描述符的可读事件*/
-    tep.data.fd = listenfd;/*设置为监听的文件描述符*/
-    /*控制epoll监控的文件描述符上的事件*/
-    res = epoll_ctl(efd, EPOLL_CTL_ADD/*注册新的fd到efd*/, listenfd, &tep);
+    listen(fd,LISTENQ);
 
-    if(res == -1)
-        perror("epoll_ctl");
+    return fd;
+}
 
-    for(;;){
-        /*等待所监控文件描述符上有事件的产生，阻塞监听*/
-        nready = epoll_wait(efd, ep, OPEN_MAX, -1);
-        if(nready == -1)
-            perror("epoll_wait");
-        for(i = 0; i < nready; i++){
-            if(!(ep[i].events & EPOLLIN))/*若不是EPOLLIN事件，不做往下的处理*/
-                continue;
-            if(ep[i].data.fd == listenfd){ /*若是EPOLLIN，执行连接，接受请求*/
-                clilen = sizeof(cliaddr);
-                /*接受请求，分配新文件描述符connfd进行通信*/
-                connfd = accept(listenfd, (struct sockaddr*)&cliaddr, &clilen);
-                printf("received from %s at PORT %d\n", (char*)inet_ntop(AF_INET, &cliaddr.sin_addr, str, sizeof(str)), ntohs(cliaddr.sin_port));
+static int accept_client_proc(int srvfd)
+{
+    struct sockaddr_in cliaddr;
+    socklen_t cliaddrlen;
+    cliaddrlen = sizeof(cliaddr);
+    int clifd = -1;
 
-                /*若将此新客户端添加至客户端集中*/
-                for(j = 0; j < OPEN_MAX; j++)
-                    if(client[j] < 0){
-                        client[j] = connfd;
-                        break;
-                    }
-                if(j == OPEN_MAX)
-                    perror("客户端超过限制");
+    printf("accpet clint proc is called.\n");
 
-                if(j > maxi)
-                    maxi = j;//保证maxi为最大文件描述符
+ACCEPT:
+    clifd = accept(srvfd,(struct sockaddr*)&cliaddr,&cliaddrlen);
 
-                tep.events = EPOLLIN;
-                tep.data.fd = connfd;
-                res = epoll_ctl(efd, EPOLL_CTL_ADD/*注册新的connfd到efd*/, connfd, &tep);
-                if(res == -1)
-                    perror("epoll_ctl");
-            }else{/*处理efd中监听的客户端请求*/
-                sockfd = ep[i].data.fd;
-                n = read(sockfd, buf, BUFSIZE);
-                if(n == 0){ /*读取若为空*/
-                    for(j = 0; j <= maxi; j++){
-                        if(client[j] == sockfd){
-                            client[j] = -1;
-                            break;
-                        }
-                    }
-                    /*清除对sockfd文件描述符事件的监听*/
-                    res = epoll_ctl(efd, EPOLL_CTL_DEL, sockfd, NULL);
-                    if(res == -1)
-                        perror("epoll_ctl");
-                    close(sockfd);
-                    printf("client[%d] closed connection\n", j);
-                }else{/*非空则处理客户端信息*/
-                    for(j = 0; j<n; j++)
-                        buf[j] = toupper(buf[j]);
-                    /*写入与客户端通信的文件描述符sockfd*/
-                    write(sockfd, buf, n);
-                }
-            }
+    if (clifd == -1) {
+        if (errno == EINTR) {
+            goto ACCEPT;
+        } else {
+            fprintf(stderr, "accept fail,error:%s\n", strerror(errno));
+            return -1;
         }
     }
-    /*关闭监听*/
-    close(listenfd);
-    close(efd);
+
+    fprintf(stdout, "accept a new client: %s:%d\n",
+            inet_ntoa(cliaddr.sin_addr),cliaddr.sin_port);
+
+    //将新的连接描述符添加到数组中
+    int i = 0;
+    for (i = 0; i < SIZE; i++) {
+        if (s_srv_ctx->clifds[i] < 0) {
+            s_srv_ctx->clifds[i] = clifd;
+            s_srv_ctx->cli_cnt++;
+            break;
+        }
+    }
+
+    if (i == SIZE) {
+        fprintf(stderr,"too many clients.\n");
+        return -1;
+    }
+101 }
+
+static int handle_client_msg(int fd, char *buf) 
+{
+    assert(buf);
+    printf("recv buf is :%s\n", buf);
+    write(fd, buf, strlen(buf) +1);
     return 0;
+}
+
+static void recv_client_msg(fd_set *readfds)
+{
+    int i = 0, n = 0;
+    int clifd;
+    char buf[MAXLINE] = {0};
+    for (i = 0;i <= s_srv_ctx->cli_cnt;i++) {
+        clifd = s_srv_ctx->clifds[i];
+        if (clifd < 0) {
+            continue;
+        }
+        /*判断客户端套接字是否有数据*/
+        if (FD_ISSET(clifd, readfds)) {
+            //接收客户端发送的信息
+            n = read(clifd, buf, MAXLINE);
+            if (n <= 0) {
+                /*n==0表示读取完成，客户都关闭套接字*/
+                FD_CLR(clifd, &s_srv_ctx->allfds);
+                close(clifd);
+                s_srv_ctx->clifds[i] = -1;
+                continue;
+            }
+            handle_client_msg(clifd, buf);
+        }
+    }
+}
+static void handle_client_proc(int srvfd)
+{
+    int  clifd = -1;
+    int  retval = 0;
+    fd_set *readfds = &s_srv_ctx->allfds;
+    struct timeval tv;
+    int i = 0;
+
+    while (1) {
+        /*每次调用select前都要重新设置文件描述符和时间，因为事件发生后，文件描述符和时间都被内核修改啦*/
+        FD_ZERO(readfds);
+        /*添加监听套接字*/
+        FD_SET(srvfd, readfds);
+        s_srv_ctx->maxfd = srvfd;
+
+        tv.tv_sec = 30;
+        tv.tv_usec = 0;
+        /*添加客户端套接字*/
+        for (i = 0; i < s_srv_ctx->cli_cnt; i++) {
+            clifd = s_srv_ctx->clifds[i];
+            /*去除无效的客户端句柄*/
+            if (clifd != -1) {
+                FD_SET(clifd, readfds);
+            }
+            s_srv_ctx->maxfd = (clifd > s_srv_ctx->maxfd ? clifd : s_srv_ctx->maxfd);
+        }
+
+        /*开始轮询接收处理服务端和客户端套接字*/
+        retval = select(s_srv_ctx->maxfd + 1, readfds, NULL, NULL, &tv);
+        if (retval == -1) {
+            fprintf(stderr, "select error:%s.\n", strerror(errno));
+            return;
+        }
+        if (retval == 0) {
+            fprintf(stdout, "select is timeout.\n");
+            continue;
+        }
+        if (FD_ISSET(srvfd, readfds)) {
+            /*监听客户端请求*/
+            accept_client_proc(srvfd);
+        } else {
+            /*接受处理客户端消息*/
+            recv_client_msg(readfds);
+        }
+    }
+}
+
+static void server_uninit()
+{
+    if (s_srv_ctx) {
+        free(s_srv_ctx);
+        s_srv_ctx = NULL;
+    }
+}
+
+static int server_init()
+{
+    s_srv_ctx = (server_context_st *)malloc(sizeof(server_context_st));
+    if (s_srv_ctx == NULL) {
+        return -1;
+    }
+
+    memset(s_srv_ctx, 0, sizeof(server_context_st));
+
+    int i = 0;
+    for (;i < SIZE; i++) {
+        s_srv_ctx->clifds[i] = -1;
+    }
+
+    return 0;
+}
+
+int main(int argc,char *argv[])
+{
+    int  srvfd;
+    /*初始化服务端context*/
+    if (server_init() < 0) {
+        return -1;
+    }
+    /*创建服务,开始监听客户端请求*/
+    srvfd = create_server_proc(IPADDR, PORT);
+    if (srvfd < 0) {
+        fprintf(stderr, "socket create or bind fail.\n");
+        goto err;
+    }
+    /*开始接收并处理客户端请求*/
+    handle_client_proc(srvfd);
+    server_uninit();
+    return 0;
+err:
+    server_uninit();
+    return -1;
 }
