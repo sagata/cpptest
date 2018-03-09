@@ -44,7 +44,7 @@ int main() {
         exit(1);
     }
 
-    char buffer[1024];
+    char buffer[10000];
     //创建另外一个线程
     //std::thread t(thread_task);
     //t.join();
